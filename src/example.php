@@ -21,9 +21,9 @@ function locking(Closure $code, ?String $callingScope){
 
 class SafeClass
 {
-    function safeMethod(NastyCollaborator $third){
-        return locking(function() use($third){
-            return $third->access();
+    function safeMethod(NastyCollaborator $collaborator){
+        return locking(function() use($collaborator){
+            return $collaborator->access();
         }, callerClassScope());
     }
 }
