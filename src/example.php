@@ -11,8 +11,9 @@ use function PHPToolBucket\Bucket\callerClassScope;
 
 require "../vendor/autoload.php";
 
-function locking(Closure $code, ?String $callingScope){
-    assert((function() use(&$result, $code, $callingScope){
+function locking(Closure $code){
+    assert((function() use(&$result, $code){
+        $callingScope = callerClassScope(2);
         $result = (new Loco())->call($code, $callingScope, TRUE);
         return TRUE;
     })());
@@ -24,7 +25,7 @@ class SafeClass
     function safeMethod(NastyCollaborator $collaborator){
         return locking(function() use($collaborator){
             return $collaborator->access();
-        }, callerClassScope());
+        });
     }
 }
 
