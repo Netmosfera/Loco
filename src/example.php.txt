@@ -12,12 +12,15 @@ use function PHPToolBucket\Bucket\callerClassScope;
 require "../vendor/autoload.php";
 
 function locking(Closure $code){
-    assert((function() use(&$result, $code){
+    $called = FALSE;
+    assert((function() use(&$result, &$called, $code){
+        $called = TRUE;
         $callingScope = callerClassScope(2);
-        $result = (new Loco())->call($code, $callingScope, TRUE);
+        $loco = new Loco();
+        $result = $loco->call($code, $callingScope, TRUE);
         return TRUE;
     })());
-    return isset($result) ? $result : $code();
+    return $called ? $result : $code();
 }
 
 class SafeClass
