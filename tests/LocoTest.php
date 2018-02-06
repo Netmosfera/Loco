@@ -4,213 +4,186 @@ namespace Netmosfera\LocoTests;
 
 //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
-use function debug_backtrace;
-use Error;
-use Netmosfera\Loco\Loco;
-use Netmosfera\Loco\LocoError;
 use function PHPToolBucket\Bucket\callerClassScope;
 use PHPUnit\Framework\TestCase;
+use Netmosfera\Loco\LocoError;
+use Netmosfera\Loco\Loco;
 use ReflectionFunction;
+use Closure;
 
 //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
+function locoRead(Closure $code){
+    $RF = new ReflectionFunction($code);
+    $object = $RF->getClosureThis();
+    assert(is_object($object));
+    $allowedScopeRC = $RF->getClosureScopeClass();
+    assert($allowedScopeRC !== NULL);
+    $callingScope = callerClassScope(1);
+    if($callingScope === $allowedScopeRC->getName()){
+        return $code();
+    }else{
+        return (new Loco())->readTransaction($code, $object);
+    }
+}
+
+function locoWrite(Closure $code){
+    $RF = new ReflectionFunction($code);
+    $object = $RF->getClosureThis();
+    assert(is_object($object));
+    $allowedScopeRC = $RF->getClosureScopeClass();
+    assert($allowedScopeRC !== NULL);
+    $callingScope = callerClassScope(1);
+    if($callingScope === $allowedScopeRC->getName()){
+        return $code();
+    }else{
+        return (new Loco())->writeTransaction($code, $object);
+    }
+}
+
+//[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
+
+class test_read_lock_prevents_inheritors_from_acquiring_write_locks{
+    function read (){ return locoRead (function(){ return $this->other->writeObjectConcurrently(); }); }
+    function write(){ return locoWrite(function(){ }); }
+}
+
+class test_read_lock_does_not_prevent_inheritors_from_acquiring_read_locks{
+    function read1(){ return locoRead (function(){ return $this->other->readObjectConcurrently(); }); }
+    function read2(){ return locoRead (function(){ return 42; }); }
+}
+
+class test_write_lock_prevents_inheritors_from_acquiring_write_locks{
+    function write1(){ return locoWrite(function(){ return $this->other->writeObjectConcurrently(); }); }
+    function write2(){ return locoWrite(function(){ }); }
+}
+
+class test_write_lock_prevents_inheritors_from_acquiring_read_locks{
+    function write(){ return locoWrite(function(){ return $this->other->readObjectConcurrently(); }); }
+    function read (){ return locoRead (function(){ }); }
+}
+
 class LocoTest extends TestCase
 {
-    function test_lock_other_class(){
+    function test_read_lock_prevents_inheritors_from_acquiring_write_locks(){
         $this->expectException(LocoError::CLASS);
-
-        $securedObject = new class(){
-            function aaa($concurrent){
-                return (new Loco)->call(function() use($concurrent){
-                    $concurrent->bbb($this);
-                }, callerClassScope(), Loco::DISALLOW_FROM_SAME_SCOPE);
-            }
+        $object = new test_read_lock_prevents_inheritors_from_acquiring_write_locks();
+        $other = new class() extends test_read_lock_prevents_inheritors_from_acquiring_write_locks{
+            function writeObjectConcurrently(){ $this->object->write(); }
         };
+        $other->object = $object;
+        $object->other = $other;
+        $object->read();
+    }
 
-        $securedObject->aaa(new class(){
-            function bbb($securedObject){
-                $securedObject->aaa(123);
-            }
-        });
+    function test_read_lock_does_not_prevent_inheritors_from_acquiring_read_locks(){
+        $object = new test_read_lock_does_not_prevent_inheritors_from_acquiring_read_locks();
+        $other = new class() extends test_read_lock_does_not_prevent_inheritors_from_acquiring_read_locks{
+            function readObjectConcurrently(){ return $this->object->read2(); }
+        };
+        $other->object = $object;
+        $object->other = $other;
+        self::assertSame(42, $object->read1());
+    }
+
+    function test_write_lock_prevents_inheritors_from_acquiring_write_locks(){
+        $this->expectException(LocoError::CLASS);
+        $object = new test_write_lock_prevents_inheritors_from_acquiring_write_locks();
+        $other = new class() extends test_write_lock_prevents_inheritors_from_acquiring_write_locks{
+            function writeObjectConcurrently(){ $this->object->write2(); }
+        };
+        $other->object = $object;
+        $object->other = $other;
+        $object->write1();
+    }
+
+    function test_write_lock_prevents_inheritors_from_acquiring_read_locks(){
+        $this->expectException(LocoError::CLASS);
+        $object = new test_write_lock_prevents_inheritors_from_acquiring_read_locks();
+        $other = new class() extends test_write_lock_prevents_inheritors_from_acquiring_read_locks{
+            function readObjectConcurrently(){ $this->object->read(); }
+        };
+        $other->object = $object;
+        $object->other = $other;
+        $object->write();
     }
 
     //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
-    function test_lock_global_scope_1(){
+    function test_read_lock_prevents_third_parties_from_acquiring_write_locks(){
         $this->expectException(LocoError::CLASS);
-
-        $securedObject = new class(){
-            function aaa($concurrent){
-                $dt = debug_backtrace();
-                $cs = callerClassScope();
-                return (new Loco)->call(function() use($concurrent){
-                    $concurrent();
-                }, callerClassScope(), Loco::ALLOW_FROM_SAME_SCOPE);
-            }
+        $object = new class(){
+            function read (){ return locoRead (function(){ return $this->other->writeObjectConcurrently(); }); }
+            function write(){ return locoWrite(function(){ }); }
         };
-
-        $securedObject->aaa(function() use($securedObject){
-            $securedObject->aaa(123);
-        });
+        $other = new class(){
+            function writeObjectConcurrently(){ $this->object->write(); }
+        };
+        $other->object = $object;
+        $object->other = $other;
+        $object->read();
     }
 
-    function test_lock_global_scope_2(){
-        $this->expectException(LocoError::CLASS);
-
-        $securedObject = new class(){
-            function aaa($concurrent){
-                return (new Loco)->call(function() use($concurrent){
-                    $concurrent();
-                }, callerClassScope(), Loco::DISALLOW_FROM_SAME_SCOPE);
-            }
+    function test_read_lock_does_not_prevent_third_parties_from_acquiring_read_locks(){
+        $object = new class(){
+            function read1(){ return locoRead (function(){ return $this->other->readObjectConcurrently(); }); }
+            function read2(){ return locoRead (function(){ return 42; }); }
         };
+        $other = new class(){
+            function readObjectConcurrently(){ return $this->object->read2(); }
+        };
+        $other->object = $object;
+        $object->other = $other;
+        self::assertSame(42, $object->read1());
+    }
 
-        $securedObject->aaa(function() use($securedObject){
-            $securedObject->aaa(123);
-        });
+    function test_write_lock_prevents_third_parties_from_acquiring_write_locks(){
+        $this->expectException(LocoError::CLASS);
+        $object = new class(){
+            function write1(){ return locoWrite(function(){ return $this->other->writeObjectConcurrently(); }); }
+            function write2(){ return locoWrite(function(){ }); }
+        };
+        $other = new class(){
+            function writeObjectConcurrently(){ $this->object->write2(); }
+        };
+        $other->object = $object;
+        $object->other = $other;
+        $object->write1();
+    }
+
+    function test_write_lock_prevents_third_parties_from_acquiring_read_locks(){
+        $this->expectException(LocoError::CLASS);
+        $object = new class(){
+            function write(){ return locoWrite(function(){ return $this->other->readObjectConcurrently(); }); }
+            function read (){ return locoRead (function(){ }); }
+        };
+        $other = new class(){
+            function readObjectConcurrently(){ $this->object->read(); }
+        };
+        $other->object = $object;
+        $object->other = $other;
+        $object->write();
     }
 
     //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
-    function test_lock_sibling_call_disallowed(){
-        $this->expectException(LocoError::CLASS);
-
-        $securedObject = new class(){
-            function aaa(){
-                return (new Loco)->call(function(){
-                    $this->bbb();
-                }, callerClassScope(), Loco::ALLOW_FROM_SAME_SCOPE);
-            }
-
-            function bbb(){
-                return (new Loco)->call(function(){
-                    throw new Error("FAILURE");
-                }, callerClassScope(), Loco::DISALLOW_FROM_SAME_SCOPE);
-            }
+    function test_read_lock_does_not_prevent_self_from_accessing_any_sibling_member(){
+        $object = new class(){
+            function read1 (){ return locoRead (function(){ return $this->read2(); }); }
+            function read2 (){ return locoRead (function(){ return $this->write1(); }); }
+            function write1(){ return locoWrite(function(){ return $this->write2(); }); }
+            function write2(){ return locoWrite(function(){ return 42; }); }
         };
-
-        $securedObject->aaa();
+        self::assertSame(42, $object->read1());
     }
 
-    function test_lock_sibling_call_allowed(){
-        $securedObject = new class(){
-            function aaa(){
-                return (new Loco)->call(function(){
-                    return $this->bbb();
-                }, callerClassScope(), Loco::DISALLOW_FROM_SAME_SCOPE);
-            }
-
-            function bbb(){
-                return (new Loco)->call(function(){
-                    return "WORKS";
-                }, callerClassScope(), Loco::ALLOW_FROM_SAME_SCOPE);
-            }
+    function test_write_lock_does_not_prevent_self_from_accessing_any_sibling_member(){
+        $object = new class(){
+            function write1(){ return locoWrite(function(){ return $this->write2(); }); }
+            function write2(){ return locoWrite(function(){ return $this->read1(); }); }
+            function read1 (){ return locoRead (function(){ return $this->read2(); }); }
+            function read2 (){ return locoRead (function(){ return 42; }); }
         };
-
-        self::assertSame("WORKS", $securedObject->aaa());
-    }
-
-    //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
-
-    function test_lock_sibling_call_allowed_deep(){
-        $securedObject = new class(){
-            function aaa(){
-                return (new Loco)->call(function(){
-                    return $this->bbb();
-                }, callerClassScope(), Loco::DISALLOW_FROM_SAME_SCOPE);
-            }
-
-            function bbb(){
-                return (new Loco)->call(function(){
-                    return $this->ccc();
-                }, callerClassScope(), Loco::ALLOW_FROM_SAME_SCOPE);
-            }
-
-            function ccc(){
-                return (new Loco)->call(function(){
-                    return "WORKS";
-                }, callerClassScope(), Loco::ALLOW_FROM_SAME_SCOPE);
-            }
-        };
-
-        self::assertSame("WORKS", $securedObject->aaa());
-    }
-
-    //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
-
-    function test_lock_sibling_call_disallowed_deep(){
-        $this->expectException(LocoError::CLASS);
-
-        $securedObject = new class(){
-            function aaa(){
-                return (new Loco)->call(function(){
-                    return $this->bbb();
-                }, callerClassScope(), Loco::DISALLOW_FROM_SAME_SCOPE);
-            }
-
-            function bbb(){
-                return (new Loco)->call(function(){
-                    return $this->ccc();
-                }, callerClassScope(), Loco::ALLOW_FROM_SAME_SCOPE);
-            }
-
-            function ccc(){
-                return (new Loco)->call(function(){
-                    return $this->ddd();
-                }, callerClassScope(), Loco::ALLOW_FROM_SAME_SCOPE);
-            }
-
-            function ddd(){
-                return (new Loco)->call(function(){
-                    return "WORKS";
-                }, callerClassScope(), Loco::DISALLOW_FROM_SAME_SCOPE);
-            }
-        };
-
-        self::assertSame("WORKS", $securedObject->aaa());
-    }
-
-    //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
-
-    function test_lock_is_not_released_after_a_sibling_is_allowed_to_call_while_locked(){
-        $this->expectException(LocoError::CLASS);
-
-        $securedObject = new class(){
-            function aaa(){
-                return (new Loco)->call(function(){
-                    $this->f1 = $this->bbb();
-                    $this->f2 = $this->bbb();
-                    $this->ddd();
-                }, callerClassScope(), Loco::DISALLOW_FROM_SAME_SCOPE);
-            }
-
-            function bbb(){
-                return (new Loco)->call(function(){
-                    return $this->ccc();
-                }, callerClassScope(), Loco::ALLOW_FROM_SAME_SCOPE);
-            }
-
-            function ccc(){
-                return (new Loco)->call(function(){
-                    return "WORKS";
-                }, callerClassScope(), Loco::ALLOW_FROM_SAME_SCOPE);
-            }
-
-            function ddd(){
-                return (new Loco)->call(function(){
-                    throw new Error();
-                }, callerClassScope(), Loco::DISALLOW_FROM_SAME_SCOPE);
-            }
-        };
-
-        try{
-            $securedObject->aaa();
-            self::assertSame(FALSE, TRUE);
-        }catch(LocoError $e){}
-
-        self::assertSame("WORKS", $securedObject->f1);
-        self::assertSame("WORKS", $securedObject->f2);
-
-        $securedObject->aaa();
+        self::assertSame(42, $object->write1());
     }
 }

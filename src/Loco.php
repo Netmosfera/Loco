@@ -4,11 +4,8 @@ namespace Netmosfera\Loco;
 
 //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
-use Error;
 use Closure;
 use Throwable;
-use ReflectionFunction;
-use function spl_object_id;
 
 //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
@@ -17,74 +14,59 @@ use function spl_object_id;
  */
 class Loco
 {
-    const ALLOW_FROM_SAME_SCOPE = TRUE;
-
-    const DISALLOW_FROM_SAME_SCOPE = FALSE;
-
-    private $locker;
-
-    private $unlocker;
-
-    private $determiner;
-
-    function __construct(){
-        $this->locker = function($object){
-            $object->{"Netmosfera\\Loco\\lockEnabled"} = TRUE;
-        };
-
-        $this->unlocker = function($object){
-            unset($object->{"Netmosfera\\Loco\\lockEnabled"});
-        };
-
-        $this->determiner = function($object){
-            return $object->{"Netmosfera\\Loco\\lockEnabled"} ?? FALSE;
-        };
+    protected function isLockedForRead($object){
+        return ($object->{"Netmosfera\\Loco\\readLock"} ?? 0) > 0;
     }
 
-    function setLocker(Closure $locker){
-        $this->locker = $locker;
+    protected function isLockedForWrite($object){
+        return isset($object->{"Netmosfera\\Loco\\writeLock"});
     }
 
-    function setUnlocker(Closure $unlocker){
-        $this->unlocker = $unlocker;
+    protected function lockForRead($object){
+        $object->{"Netmosfera\\Loco\\readLock"} = $object->{"Netmosfera\\Loco\\readLock"} ?? 0;
+        $object->{"Netmosfera\\Loco\\readLock"}++;
     }
 
-    function setDeterminer(Closure $determiner){
-        $this->determiner = $determiner;
-    }
-
-    function call(Closure $code, ?String $callingScope, Bool $allowFromSameScope){
-        $RF = new ReflectionFunction($code);
-
-        $thisObject = $RF->getClosureThis();
-        if($thisObject === NULL){
-            throw new Error("In order to lock it, `\$this` is required to be bound to the `Closure`");
+    protected function unlockForRead($object){
+        assert(($object->{"Netmosfera\\Loco\\readLock"} ?? 0) > 0);
+        if($object->{"Netmosfera\\Loco\\readLock"} === 1){
+            unset($object->{"Netmosfera\\Loco\\readLock"});
+        }else{
+            $object->{"Netmosfera\\Loco\\readLock"}--;
         }
+    }
 
-        $closureScopeRC = $RF->getClosureScopeClass();
-        $closureScope = $closureScopeRC === NULL ? NULL : $closureScopeRC->getName();
-        $calledFromSameScope = $callingScope === $closureScope;
+    protected function lockForWrite($object){
+        $object->{"Netmosfera\\Loco\\writeLock"} = TRUE;
+    }
 
-        $unlockWhenFinished = TRUE;
+    protected function unlockForWrite($object){
+        assert(($object->{"Netmosfera\\Loco\\writeLock"} ?? FALSE) === TRUE);
+        unset($object->{"Netmosfera\\Loco\\writeLock"});
+    }
 
-        if(($this->determiner)($thisObject) === TRUE){
-            if($calledFromSameScope && $allowFromSameScope){
-                $unlockWhenFinished = FALSE;
-            }else{
-                throw new LocoError("The object `" . get_class($thisObject) . "#" . spl_object_id($thisObject) . "` is locked at this point");
-            }
+    function readTransaction(Closure $code, $object){
+        if($this->isLockedForWrite($object)){
+            throw new LocoError($object, FALSE);
         }
-
-        ($this->locker)($thisObject);
-
+        $this->lockForRead($object);
         $return = $throwable = NULL;
         try{ $return = $code(); }
         catch(Throwable $throwable){}
+        $this->unlockForRead($object);
+        if($throwable !== NULL){ throw $throwable; }
+        else{ return $return; }
+    }
 
-        if($unlockWhenFinished){
-            ($this->unlocker)($thisObject);
+    function writeTransaction(Closure $code, $object){
+        if($this->isLockedForWrite($object) || $this->isLockedForRead($object)){
+            throw new LocoError($object, TRUE);
         }
-
+        $this->lockForWrite($object);
+        $return = $throwable = NULL;
+        try{ $return = $code(); }
+        catch(Throwable $throwable){}
+        $this->unlockForWrite($object);
         if($throwable !== NULL){ throw $throwable; }
         else{ return $return; }
     }
