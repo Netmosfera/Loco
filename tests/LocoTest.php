@@ -23,7 +23,7 @@ function locoRead(Closure $code){
     if($callingScope === $allowedScopeRC->getName()){
         return $code();
     }else{
-        return (new Loco())->readTransaction($code, $object);
+        return (new Loco())->readTransaction($code, [$object]);
     }
 }
 

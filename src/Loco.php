@@ -45,15 +45,24 @@ class Loco
         unset($object->{"Netmosfera\\Loco\\writeLock"});
     }
 
-    function readTransaction(Closure $code, $object){
-        if($this->isLockedForWrite($object)){
-            throw new LocoError($object, FALSE);
+    function readTransaction(Closure $code, Array $objects){
+        assert(count($objects) > 0);
+
+        foreach($objects as $object){
+            if($this->isLockedForWrite($object)){
+                throw new LocoError($object, FALSE);
+            }
+            $this->lockForRead($object);
         }
-        $this->lockForRead($object);
+
         $return = $throwable = NULL;
         try{ $return = $code(); }
         catch(Throwable $throwable){}
-        $this->unlockForRead($object);
+
+        foreach($objects as $object){
+            $this->unlockForRead($object);
+        }
+
         if($throwable !== NULL){ throw $throwable; }
         else{ return $return; }
     }
@@ -62,11 +71,15 @@ class Loco
         if($this->isLockedForWrite($object) || $this->isLockedForRead($object)){
             throw new LocoError($object, TRUE);
         }
+
         $this->lockForWrite($object);
+
         $return = $throwable = NULL;
         try{ $return = $code(); }
         catch(Throwable $throwable){}
+
         $this->unlockForWrite($object);
+
         if($throwable !== NULL){ throw $throwable; }
         else{ return $return; }
     }
