@@ -49,7 +49,7 @@ class Calculator
     }
     
     function sum(iterable $numbers){
-        return write(function(){
+        return write(function() use($numbers){
             foreach($numbers as $number){
                 $this->total += $number;
             }
