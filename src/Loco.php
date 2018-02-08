@@ -6,6 +6,7 @@ namespace Netmosfera\Loco;
 
 use Closure;
 use Throwable;
+use const PHP_INT_MIN;
 
 //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
@@ -14,43 +15,94 @@ use Throwable;
  */
 class Loco
 {
-    protected function isLockedForRead($object){
-        return ($object->{"Netmosfera\\Loco\\readLock"} ?? 0) > 0;
+    private $RL;
+    private $WL;
+
+    function __construct(
+        ?String $readLockPropertyName = NULL,
+        ?String $writeLockPropertyName = NULL,
+        ?String $modCountPropertyName = NULL
+    ){
+        $this->RL = $readLockPropertyName ?? "Netmosfera\\Loco\\readLock";
+        $this->WL = $writeLockPropertyName ?? "Netmosfera\\Loco\\writeLock";
+        $this->CC = $modCountPropertyName ?? "Netmosfera\\Loco\\modCount";
     }
 
-    protected function isLockedForWrite($object){
-        return isset($object->{"Netmosfera\\Loco\\writeLock"});
+    //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
+
+    protected function isLockedForRead($object){
+        $isLockedForRead = ($object->{$this->RL} ?? 0) > 0;
+        assert($isLockedForRead ? ($this->isLockedForWrite($object) === FALSE) : TRUE);
+        return $isLockedForRead;
     }
 
     protected function lockForRead($object){
-        $object->{"Netmosfera\\Loco\\readLock"} = $object->{"Netmosfera\\Loco\\readLock"} ?? 0;
-        $object->{"Netmosfera\\Loco\\readLock"}++;
+        assert($this->isLockedForWrite($object) === FALSE);
+        $object->{$this->RL} = $object->{$this->RL} ?? 0;
+        $object->{$this->RL}++;
     }
 
     protected function unlockForRead($object){
-        assert(($object->{"Netmosfera\\Loco\\readLock"} ?? 0) > 0);
-        if($object->{"Netmosfera\\Loco\\readLock"} === 1){
-            unset($object->{"Netmosfera\\Loco\\readLock"});
+        assert($this->isLockedForRead($object));
+        if($object->{$this->RL} === 1){
+            unset($object->{$this->RL});
         }else{
-            $object->{"Netmosfera\\Loco\\readLock"}--;
+            $object->{$this->RL}--;
         }
     }
 
+    //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
+
+    protected function isLockedForWrite($object){
+        $isLockedForWrite = isset($object->{$this->WL});
+        assert($isLockedForWrite ? ($this->isLockedForRead($object) === FALSE) : TRUE);
+        return $isLockedForWrite;
+    }
+
     protected function lockForWrite($object){
-        $object->{"Netmosfera\\Loco\\writeLock"} = TRUE;
+        assert($this->isLockedForWrite($object) === FALSE);
+        assert($this->isLockedForRead($object) === FALSE);
+        $object->{$this->WL} = TRUE;
     }
 
     protected function unlockForWrite($object){
-        assert(($object->{"Netmosfera\\Loco\\writeLock"} ?? FALSE) === TRUE);
-        unset($object->{"Netmosfera\\Loco\\writeLock"});
+        $this->isLockedForWrite($object);
+        unset($object->{$this->WL});
     }
+
+    //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
+
+    function acquireVerifyKey($object){
+        return $object->{$this->CC} ?? NULL;
+    }
+
+    protected function incrementVersion($object){
+        if(isset($object->{$this->CC})){
+            $object->{$this->CC}++;
+            // @TBD this overflows to float after PHP_INT_MAX has been reached.
+        }else{
+            $object->{$this->CC} = PHP_INT_MIN;
+        }
+    }
+
+    function resetVersion($object){
+        unset($object->{$this->CC});
+    }
+
+    function verifyKey($object, $key){
+        if($this->acquireVerifyKey($object) !== $key){
+            throw new LocoError($object, LocoError::ACTION_VERIFY_WEAK_READ_LOCK);
+        }
+    }
+
+    //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
     function readTransaction(Closure $code, Array $objects){
         assert(count($objects) > 0);
 
         foreach($objects as $object){
             if($this->isLockedForWrite($object)){
-                throw new LocoError($object, FALSE);
+                throw new LocoError($object, LocoError::ACTION_ACQUIRE_READ_LOCK);
             }
             $this->lockForRead($object);
         }
@@ -67,9 +119,13 @@ class Loco
         else{ return $return; }
     }
 
+    //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
+
     function writeTransaction(Closure $code, $object){
+        $this->incrementVersion($object); // Increment before throwing, just in case
+
         if($this->isLockedForWrite($object) || $this->isLockedForRead($object)){
-            throw new LocoError($object, TRUE);
+            throw new LocoError($object, LocoError::ACTION_ACQUIRE_WRITE_LOCK);
         }
 
         $this->lockForWrite($object);
@@ -83,4 +139,6 @@ class Loco
         if($throwable !== NULL){ throw $throwable; }
         else{ return $return; }
     }
+
+    //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 }
