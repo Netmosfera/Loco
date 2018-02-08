@@ -33,15 +33,15 @@ being in the state `X`; after a period of time in which `$server` might have cha
 `$server`'s state is still `X`. If it's not, it throws an error, otherwise it continues with
 the execution of the requested task.
 
-## Example
+## Example read/write locks
 
 ```php
 <?php
 
 class Calculator
 {
-    private $total;
-    
+    private $total = 0;
+        
     function getTotal(){
         return read(function(){
             return $this->total;
@@ -58,11 +58,12 @@ class Calculator
 }
 
 $calculator = new Calculator();
-
-$calculator->sum([10]);
+$calculator->sum([42]);
 
 $calculator->sum((function() use($calculator){
-    // Third-party doing nasty things.
+    
+    // Third-party doing nasty things:
+    
     /** @var Calculator $calculator */
 
     yield $calculator->getTotal(); // dirty read
@@ -73,6 +74,11 @@ $calculator->sum((function() use($calculator){
 })());
 ```
 
+## Example weak read locks 
+
+```php
+
+```
 
 
 

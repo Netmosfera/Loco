@@ -97,23 +97,18 @@ class Loco
 
     //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
-    function readTransaction(Closure $code, Array $objects){
-        assert(count($objects) > 0);
+    function readTransaction(Closure $code, $object){
 
-        foreach($objects as $object){
-            if($this->isLockedForWrite($object)){
-                throw new LocoError($object, LocoError::ACTION_ACQUIRE_READ_LOCK);
-            }
-            $this->lockForRead($object);
+        if($this->isLockedForWrite($object)){
+            throw new LocoError($object, LocoError::ACTION_ACQUIRE_READ_LOCK);
         }
+        $this->lockForRead($object);
 
         $return = $throwable = NULL;
         try{ $return = $code(); }
         catch(Throwable $throwable){}
 
-        foreach($objects as $object){
-            $this->unlockForRead($object);
-        }
+        $this->unlockForRead($object);
 
         if($throwable !== NULL){ throw $throwable; }
         else{ return $return; }
