@@ -33,57 +33,8 @@ being in the state `X`; after a period of time in which `$server` might have cha
 `$server`'s state is still `X`. If it's not, it throws an error, otherwise it continues with
 the execution of the requested task.
 
-## Example read/write locks
+## Examples 
 
-```php
-<?php
-
-class Calculator
-{
-    private $total = 0;
-        
-    function getTotal(){
-        return read(function(){
-            return $this->total;
-        });
-    }
-    
-    function sum(iterable $numbers){
-        return write(function() use($numbers){
-            foreach($numbers as $number){
-                $this->total += $number;
-            }
-        });
-    }
-}
-
-$calculator = new Calculator();
-$calculator->sum([42]);
-
-$calculator->sum((function() use($calculator){
-    
-    // Third-party doing nasty things:
-    
-    /** @var Calculator $calculator */
-
-    yield $calculator->getTotal(); // dirty read
-    yield $calculator->getTotal(); // dirty read
-    yield $calculator->getTotal(); // dirty read
-    
-    $calculator->sum([20]); // concurrent modification
-})());
-```
-
-## Example weak read locks 
-
-```php
-
-```
-
-
-
-
-
-
-
+- [Locks example](examples/locks.php)
+- [Weak read locks example](examples/weakReadLocks.php)
 

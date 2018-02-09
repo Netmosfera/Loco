@@ -17,6 +17,7 @@ class Loco
 {
     private $RL;
     private $WL;
+    private $CC;
 
     function __construct(
         ?String $readLockPropertyName = NULL,
@@ -72,10 +73,6 @@ class Loco
 
     //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
-    function acquireVerifyKey($object){
-        return $object->{$this->CC} ?? NULL;
-    }
-
     protected function incrementVersion($object){
         if(isset($object->{$this->CC})){
             $object->{$this->CC}++;
@@ -85,12 +82,12 @@ class Loco
         }
     }
 
-    function resetVersion($object){
-        unset($object->{$this->CC});
+    function getStateID($object){
+        return $object->{$this->CC} ?? NULL;
     }
 
-    function verifyKey($object, $key){
-        if($this->acquireVerifyKey($object) !== $key){
+    function verifyStateID($object, $stateID){
+        if($this->getStateID($object) !== $stateID){
             throw new LocoError($object, LocoError::ACTION_VERIFY_WEAK_READ_LOCK);
         }
     }
@@ -98,7 +95,6 @@ class Loco
     //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 
     function readTransaction(Closure $code, $object){
-
         if($this->isLockedForWrite($object)){
             throw new LocoError($object, LocoError::ACTION_ACQUIRE_READ_LOCK);
         }
@@ -134,6 +130,4 @@ class Loco
         if($throwable !== NULL){ throw $throwable; }
         else{ return $return; }
     }
-
-    //[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]
 }
