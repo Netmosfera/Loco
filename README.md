@@ -38,3 +38,5 @@ the execution of the requested task.
 - [Locks example](examples/locks.php)
 - [Weak read locks example](examples/weakReadLocks.php)
 
+Note that the functions `locoRead`, `locoWrite` etc, are not bundled with the package (yet),
+they must be defined in each project using _Loco_. 
